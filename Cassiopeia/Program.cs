@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using LeagueSharp;
 using LeagueSharp.Common;
 using SharpDX;
+using Color = System.Drawing.Color;
 
 namespace Cassiopeia
 {
@@ -21,6 +22,8 @@ namespace Cassiopeia
         static int dontUseQW = -1;
         static float dontUseQW2 = 0;
         static float castWafter = 0;
+        static float castWafter2 = 0;
+        static Obj_AI_Hero selectedTarget = null;
 
         static Menu menu = new Menu("Cassiopeia", "Cassiopeia", true);
 
@@ -49,15 +52,34 @@ namespace Cassiopeia
 
             menu.AddSubMenu(new Menu("Orbwalking", "Orbwalking"));
             Orbwalker = new Orbwalking.Orbwalker(menu.SubMenu("Orbwalking"));
-            menu.AddItem(new MenuItem("useAAcombo", "Use AA in Combo").SetValue(true));
-            menu.AddItem(new MenuItem("PacketCast", "Use Packets").SetValue(true));
-            menu.AddToMainMenu();
 
+            menu.AddSubMenu(new Menu("Harass", "Harass"));
+            menu.SubMenu("Harass").AddItem(new MenuItem("qHarass", "Use Q").SetValue(true));
+            menu.SubMenu("Harass").AddItem(new MenuItem("wHarass", "Use W").SetValue(false));
+            menu.SubMenu("Harass").AddItem(new MenuItem("eHarass", "Use E").SetValue(true));
+
+            menu.AddSubMenu(new Menu("LineClear", "LineClear"));
+            menu.SubMenu("LineClear").AddItem(new MenuItem("lineclearQ", "Use Q").SetValue(true));
+            menu.SubMenu("LineClear").AddItem(new MenuItem("lineclearW", "Use W").SetValue(false));
+
+            menu.AddSubMenu(new Menu("JungleClear", "JungleClear"));
+            menu.SubMenu("JungleClear").AddItem(new MenuItem("jungleclearQ", "Use Q").SetValue(true));
+            menu.SubMenu("JungleClear").AddItem(new MenuItem("jungleclearW", "Use W").SetValue(false));
+
+            menu.AddSubMenu(new Menu("Misc", "Misc"));
+            menu.SubMenu("Misc").AddItem(new MenuItem("focusSelectedTarget", "Focus Selected Target").SetValue(true));
+            menu.SubMenu("Misc").AddItem(new MenuItem("useAAcombo", "Use AA in Combo").SetValue(true));
+            menu.SubMenu("Misc").AddItem(new MenuItem("PacketCast", "Use Packets").SetValue(true));
+
+            menu.AddToMainMenu();
+            
             Game.OnGameUpdate += OnGameUpdate;
             Orbwalking.BeforeAttack += Orbwalking_BeforeAttack;
-            Game.OnGameSendPacket += Game_OnGameSendPacket;
+            //Game.OnGameSendPacket += Game_OnGameSendPacket;
             AntiGapcloser.OnEnemyGapcloser += AntiGapcloser_OnEnemyGapcloser;
             Interrupter.OnPossibleToInterrupt += Interrupter_OnPossibleToInterrupt;
+            Game.OnWndProc += GameOnOnWndProc;
+            Drawing.OnDraw += DrawingOnOnDraw;
         }
 
         static void OnGameUpdate(EventArgs args)
@@ -69,8 +91,13 @@ namespace Cassiopeia
                     case Orbwalking.OrbwalkingMode.Combo:
                         Combo();
                         break;
-                    case Orbwalking.OrbwalkingMode.LaneClear:
+                    case Orbwalking.OrbwalkingMode.Mixed:
                         EFarm();
+                        Combo(true);
+                        break;
+                    case Orbwalking.OrbwalkingMode.LaneClear:
+                        LineClear();
+                        JungleClear();
                         break;
                     case Orbwalking.OrbwalkingMode.LastHit:
                         EFarm();
@@ -84,6 +111,28 @@ namespace Cassiopeia
             }
         }
 
+        private static void DrawingOnOnDraw(EventArgs args)
+        {
+            if (!menu.Item("focusSelectedTarget").GetValue<bool>()) return;
+
+            if (selectedTarget.IsValidTarget())
+            {
+                Render.Circle.DrawCircle(selectedTarget.Position, 150, Color.Red, 7, true);
+            }
+        }
+
+        private static void GameOnOnWndProc(WndEventArgs args)
+        {
+            if (!menu.Item("focusSelectedTarget").GetValue<bool>()) return;
+
+            if (args.Msg != (uint)WindowsMessages.WM_LBUTTONDOWN)
+                return;
+
+            selectedTarget = ObjectManager.Get<Obj_AI_Hero>()
+                    .Where(hero => hero.IsValidTarget() && hero.Distance(Game.CursorPos, true) < 40000)
+                    .OrderBy(h => h.Distance(Game.CursorPos, true)).FirstOrDefault();
+        }
+
         static void Game_OnGameSendPacket(GamePacketEventArgs args)
         {
             if (args.PacketData[0] == Packet.C2S.Cast.Header)
@@ -95,7 +144,9 @@ namespace Cassiopeia
                     var query = GetEnemyList().Where(x => R.WillHit(x, vecCast));
 
                     if (query.Count() == 0)
+                    {
                         args.Process = false;
+                    }
                 }
             }
         }
@@ -140,20 +191,111 @@ namespace Cassiopeia
                 var buffEndTime = GetPoisonBuffEndTime(minion);
                 if (buffEndTime > Game.Time + E.Delay)
                 {
-                    if (getEDmg(minion) >= minion.Health)
+                    if (getEDmg(minion) >= minion.Health * 1.1)
                         E.CastOnUnit(minion, menu.Item("PacketCast").GetValue<bool>());
                 }
             }
         }
 
-        private static void Combo()
+        private static void LineClear()
         {
-            if (menu.Item("useAAcombo").GetValue<bool>())
-                Orbwalker.ForceTarget(GetEnemyList().Where(x => x.IsValidTarget(Orbwalking.GetRealAutoAttackRange(x))).OrderBy(x => x.Health / getEDmg(x)).FirstOrDefault());
+            List<Obj_AI_Base> mobs = MinionManager.GetMinions(player.ServerPosition, Q.Range, MinionTypes.All, MinionTeam.Enemy, MinionOrderTypes.MaxHealth).ToList();
+
+            if (!mobs.Any())
+                return;
 
             Boolean packetCast = menu.Item("PacketCast").GetValue<bool>();
 
-            if (R.IsReady())
+            if (Q.IsReady() && menu.Item("lineclearQ").GetValue<bool>())
+            {
+                MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), Q.Width * 0.9f);
+                if (Qunpoisoned.MinionsHit > 0)
+                {
+                    Q.Cast(Qunpoisoned.Position, packetCast);
+                    castWafter2 = Game.Time + Q.Delay;
+                    return;
+                }
+            }
+
+            if (W.IsReady() && menu.Item("lineclearW").GetValue<bool>() && castWafter2 < Game.Time)
+            {
+                MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), W.Width);
+                if (Qunpoisoned.MinionsHit > 0)
+                    W.Cast(Qunpoisoned.Position, packetCast);
+            }
+
+            if (E.IsReady())
+            {
+                Obj_AI_Base mob = mobs.Where(x => x.HasBuffOfType(BuffType.Poison) && x.IsValidTarget(E.Range) && GetPoisonBuffEndTime(x) > (Game.Time + E.Delay)).FirstOrDefault();
+                if (mob != null)
+                    E.CastOnUnit(mob, packetCast);
+            }
+        }
+
+        private static void JungleClear()
+        {
+            List<Obj_AI_Base> mobs = MinionManager.GetMinions(player.ServerPosition, Q.Range, MinionTypes.All, MinionTeam.Neutral, MinionOrderTypes.MaxHealth).ToList();
+
+            if (!mobs.Any())
+                return;
+
+            Boolean packetCast = menu.Item("PacketCast").GetValue<bool>();
+            
+            MinionManager.FarmLocation mf = Q.GetCircularFarmLocation(mobs, Q.Width * 0.9f);
+
+            if (Q.IsReady() && menu.Item("jungleclearQ").GetValue<bool>())
+            {
+                if (mf.MinionsHit > 1)
+                    Q.Cast(mf.Position, packetCast);
+                else
+                    Q.Cast(mobs.FirstOrDefault(), packetCast);
+
+                castWafter2 = Game.Time + Q.Delay;
+            }
+
+            if (W.IsReady() && menu.Item("jungleclearW").GetValue<bool>() && castWafter2 < Game.Time)
+            {
+                MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), W.Width);
+                if (Qunpoisoned.MinionsHit > 0)
+                    W.Cast(Qunpoisoned.Position, packetCast);
+            }
+
+            if (E.IsReady())
+            {
+                Obj_AI_Base mob = mobs.Where(x => x.HasBuffOfType(BuffType.Poison) && x.IsValidTarget(E.Range) && GetPoisonBuffEndTime(x) > (Game.Time + E.Delay)).FirstOrDefault();
+                if (mob != null)
+                    E.CastOnUnit(mob, packetCast);
+            }
+            
+        }
+
+        private static void Combo(Boolean harass = false)
+        {
+            Boolean checkTarget = true;
+
+            if (menu.Item("focusSelectedTarget").GetValue<bool>())
+            {
+                if (selectedTarget.IsValidTarget())
+                {
+                    checkTarget = false;
+
+                    if (dontUseQW2 > Game.ClockTime)
+                        if (selectedTarget.NetworkId == dontUseQW)
+                            checkTarget = true;
+                }
+            }
+
+            if (menu.Item("useAAcombo").GetValue<bool>())
+            {
+                if (checkTarget)
+                    Orbwalker.ForceTarget(GetEnemyList().Where(x => x.IsValidTarget(Orbwalking.GetRealAutoAttackRange(x))).OrderBy(x => x.Health / getEDmg(x)).FirstOrDefault());
+                else
+                    Orbwalker.ForceTarget(selectedTarget);
+            }
+
+            Boolean packetCast = menu.Item("PacketCast").GetValue<bool>();
+
+            if (R.IsReady() && !harass)
             {
                 Obj_AI_Hero enemyR = GetEnemyList().Where(x => player.Distance(x.Position) <= 650f && !x.IsInvulnerable).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
                 if (enemyR != null)
@@ -187,52 +329,62 @@ namespace Cassiopeia
                 }
             }
 
-            if (E.IsReady())
+            if (E.IsReady() && (!harass || menu.Item("eHarass").GetValue<bool>()))
             {
-                List<Obj_AI_Hero> Eenemies = GetEnemyList();
+                Obj_AI_Hero mainTarget = null;
 
-                Obj_AI_Hero eTarget = null;
-                Obj_AI_Hero eTarget2 = null;
-
-                if (Eenemies.Count() > 0)
+                if (checkTarget)
                 {
-                    double minCast1 = -1;
-                    double minCast2 = -1;
+                    List<Obj_AI_Hero> Eenemies = GetEnemyList();
 
-                    foreach (Obj_AI_Hero enemyto in Eenemies)
+                    Obj_AI_Hero eTarget = null;
+                    Obj_AI_Hero eTarget2 = null;
+
+                    if (Eenemies.Count() > 0)
                     {
-                        if (!enemyto.IsValidTarget(E.Range)) continue;
+                        double minCast1 = -1;
+                        double minCast2 = -1;
 
-                        Boolean buffedEnemy = false;
-                        if (enemyto.HasBuffOfType(BuffType.Poison))
+                        foreach (Obj_AI_Hero enemyto in Eenemies)
                         {
-                            var buffEndTime = GetPoisonBuffEndTime(enemyto);
-                            if (buffEndTime > Game.Time + E.Delay)
-                                buffedEnemy = true;
-                        }
+                            if (!enemyto.IsValidTarget(E.Range)) continue;
 
-                        if (buffedEnemy)
-                        {
-                            double casts = enemyto.Health / getEDmg(enemyto);
-                            if (minCast1 == -1 || minCast1 > casts)
+                            Boolean buffedEnemy = false;
+                            if (enemyto.HasBuffOfType(BuffType.Poison))
                             {
-                                minCast1 = casts;
-                                eTarget = enemyto;
+                                var buffEndTime = GetPoisonBuffEndTime(enemyto);
+                                if (buffEndTime > Game.Time + E.Delay)
+                                    buffedEnemy = true;
                             }
-                        }
-                        else if (getEDmg(enemyto) > enemyto.Health * 1.03)
-                        {
-                            float dist = player.Distance(enemyto.Position);
-                            if (minCast2 == -1 || minCast2 < dist)
+
+                            if (buffedEnemy)
                             {
-                                minCast2 = dist;
-                                eTarget2 = enemyto;
+                                double casts = enemyto.Health / getEDmg(enemyto);
+                                if (minCast1 == -1 || minCast1 > casts)
+                                {
+                                    minCast1 = casts;
+                                    eTarget = enemyto;
+                                }
+                            }
+                            else if (getEDmg(enemyto) > enemyto.Health * 1.03)
+                            {
+                                float dist = player.Distance(enemyto.Position);
+                                if (minCast2 == -1 || minCast2 < dist)
+                                {
+                                    minCast2 = dist;
+                                    eTarget2 = enemyto;
+                                }
                             }
                         }
                     }
-                }
 
-                Obj_AI_Hero mainTarget = (eTarget != null) ? eTarget : eTarget2;
+                    mainTarget = (eTarget != null) ? eTarget : eTarget2;
+                }
+                else
+                {
+                    if (player.Distance(selectedTarget.Position) <= E.Range && ((selectedTarget.HasBuffOfType(BuffType.Poison) && GetPoisonBuffEndTime(selectedTarget) > Game.Time + E.Delay) || getEDmg(selectedTarget) > selectedTarget.Health * 1.03))
+                        mainTarget = selectedTarget;
+                }
 
                 if (mainTarget != null)
                 {
@@ -249,10 +401,18 @@ namespace Cassiopeia
                 }
             }
 
-            Obj_AI_Hero enemy = getTarget(Q.Range);
+            Obj_AI_Hero enemy = (!checkTarget) ? selectedTarget : getTarget(Q.Range);
+            
             if (enemy != null)
             {
-                if (Q.IsReady())
+                if (IgniteSlot != SpellSlot.Unknown && player.Spellbook.CanUseSpell(IgniteSlot) == SpellState.Ready)
+                {
+                    if (player.Distance(enemy.Position) <= 600f)
+                        if (ObjectManager.Player.GetSummonerSpellDamage(enemy, Damage.SummonerSpell.Ignite) / enemy.Health > 1.05)
+                            player.Spellbook.CastSpell(IgniteSlot, enemy);
+                }
+
+                if (Q.IsReady() && (!harass || menu.Item("qHarass").GetValue<bool>()))
                 {
                     if (Q.CastIfHitchanceEquals(enemy, HitChance.High, packetCast))
                     {
@@ -261,17 +421,10 @@ namespace Cassiopeia
                     }
                 }
 
-                if (!Q.IsReady() && castWafter < Game.Time && W.IsReady() && !enemy.HasBuffOfType(BuffType.Poison))
+                if (!Q.IsReady() && castWafter < Game.Time && W.IsReady() && !enemy.HasBuffOfType(BuffType.Poison) && (!harass || menu.Item("wHarass").GetValue<bool>()))
                 {
                     W.CastIfHitchanceEquals(enemy, HitChance.High, packetCast);
                     return;
-                }
-
-                if (IgniteSlot != SpellSlot.Unknown && player.Spellbook.CanUseSpell(IgniteSlot) == SpellState.Ready)
-                {
-                    if (player.Distance(enemy.Position) <= 600f)
-                        if (ObjectManager.Player.GetSummonerSpellDamage(enemy, Damage.SummonerSpell.Ignite) / enemy.Health > 1.05)
-                            player.Spellbook.CastSpell(IgniteSlot, enemy);
                 }
             }
         }

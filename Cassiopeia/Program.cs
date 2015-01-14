@@ -33,6 +33,8 @@ namespace Cassiopeia
         {
             if (player.ChampionName != "Cassiopeia") return;
 
+            Game.PrintChat("Cassiopeia combo by Huntera");
+
             Q = new Spell(SpellSlot.Q, 850f);
             Q.SetSkillshot(0.6f, 40f, float.MaxValue, false, SkillshotType.SkillshotCircle);
 

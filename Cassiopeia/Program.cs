@@ -209,8 +209,8 @@ namespace Cassiopeia
 
             if (E.IsReady())
             {
-                Obj_AI_Base mob = mobs.Where(x => x.HasBuffOfType(BuffType.Poison) && x.IsValidTarget(E.Range) && GetPoisonBuffEndTime(x) > (Game.Time + E.Delay)).FirstOrDefault();
-                if (mob != null && (!menu.Item("onlylasthitE").GetValue<bool>() || getEDmg(mob) >= mob.Health * 1.1))
+                Obj_AI_Base mob = mobs.Where(x => x.HasBuffOfType(BuffType.Poison) && x.IsValidTarget(E.Range) && GetPoisonBuffEndTime(x) > (Game.Time + E.Delay) && (!menu.Item("onlylasthitE").GetValue<bool>() || getEDmg(x) >= x.Health * 1.1)).FirstOrDefault();
+                if (mob != null)
                     E.CastOnUnit(mob, packetCast);
             }
 

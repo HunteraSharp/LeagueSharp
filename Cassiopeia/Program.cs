@@ -24,6 +24,9 @@ namespace Cassiopeia
         static float castWafter = 0;
         static float castWafter2 = 0;
         static Obj_AI_Hero selectedTarget = null;
+        static int legitEdelay = 0;
+
+        static Boolean debug = false;
 
         static Menu menu = new Menu("Cassiopeia", "Cassiopeia", true);
 
@@ -68,6 +71,8 @@ namespace Cassiopeia
             menu.SubMenu("JungleClear").AddItem(new MenuItem("jungleclearW", "Use W").SetValue(false));
 
             menu.AddSubMenu(new Menu("Misc", "Misc"));
+            menu.SubMenu("Misc").AddItem(new MenuItem("castedalay", "Cast E delay (in ticks)").SetValue(new Slider(0, 0, 2000)));
+            menu.SubMenu("Misc").AddItem(new MenuItem("castWPoisoned", "Cast W only if target isn't poisoned").SetValue(true));
             menu.SubMenu("Misc").AddItem(new MenuItem("focusSelectedTarget", "Focus Selected Target").SetValue(true));
             menu.SubMenu("Misc").AddItem(new MenuItem("useAAcombo", "Use AA in Combo").SetValue(true));
             menu.SubMenu("Misc").AddItem(new MenuItem("PacketCast", "Use Packets").SetValue(true));
@@ -114,11 +119,23 @@ namespace Cassiopeia
 
         private static void DrawingOnOnDraw(EventArgs args)
         {
-            if (!menu.Item("focusSelectedTarget").GetValue<bool>()) return;
-
-            if (selectedTarget.IsValidTarget())
+            if (debug)
             {
-                Render.Circle.DrawCircle(selectedTarget.Position, 150, Color.Red, 7, true);
+                Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(R.Range)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
+                if (enemyR != null)
+                {
+                    PredictionOutput castPred = R.GetPrediction(enemyR, true, R.Range);
+                    int enemiesHit = GetEnemyList().Where(x => R.WillHit(x.Position, castPred.CastPosition)).Count();
+                    Drawing.DrawText(10, 10, Color.Yellow, enemiesHit.ToString());
+                }
+            }
+
+            if (menu.Item("focusSelectedTarget").GetValue<bool>())
+            {
+                if (selectedTarget.IsValidTarget())
+                {
+                    Render.Circle.DrawCircle(selectedTarget.Position, 150, Color.Red, 7, true);
+                }
             }
         }
 
@@ -288,28 +305,28 @@ namespace Cassiopeia
 
             if (menu.Item("useAAcombo").GetValue<bool>())
             {
-                if (checkTarget)
-                    Orbwalker.ForceTarget(GetEnemyList().Where(x => x.IsValidTarget(Orbwalking.GetRealAutoAttackRange(x))).OrderBy(x => x.Health / getEDmg(x)).FirstOrDefault());
-                else
-                    Orbwalker.ForceTarget(selectedTarget);
+                try
+                {
+                    if (checkTarget)
+                        Orbwalker.ForceTarget(GetEnemyList().Where(x => x.IsValidTarget(Orbwalking.GetRealAutoAttackRange(x))).OrderBy(x => x.Health / getEDmg(x)).FirstOrDefault());
+                    else
+                        Orbwalker.ForceTarget(selectedTarget);
+                }
+                catch (Exception ex) { }
             }
 
             Boolean packetCast = menu.Item("PacketCast").GetValue<bool>();
 
             if (R.IsReady() && !harass)
             {
-                Obj_AI_Hero enemyR = GetEnemyList().Where(x => player.Distance(x.Position) <= 650f && !x.IsInvulnerable).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
+                Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(650f)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
                 if (enemyR != null)
                 {
                     PredictionOutput castPred = R.GetPrediction(enemyR, true, R.Range);
-
-                    List<Obj_AI_Hero> enemiesHit = GetEnemyList().Where(x => R.WillHit(x, castPred.CastPosition)).ToList();
+                    
+                    List<Obj_AI_Hero> enemiesHit = GetEnemyList().Where(x => R.WillHit(x.Position, castPred.CastPosition)).ToList();
+                    int facingEnemies = enemiesHit.Where(x => x.IsFacing(player)).Count();
                     int countList = enemiesHit.Count();
-                    int facingEnemies = 0;
-                    foreach (Obj_AI_Hero hero in enemiesHit)
-                        if (hero.IsFacing(player))
-                            facingEnemies++;
-
 
                     if ((countList >= 2 && facingEnemies >= 1) || countList >= 3 || (countList == 1 && player.Level < 14))
                     {
@@ -318,19 +335,23 @@ namespace Cassiopeia
                         if (countList == 1)
                         {
                             ult = false;
-                            int multipleE = (facingEnemies == 1) ? 4 : 2;
-                            int multipleQ = (facingEnemies == 1) ? 2 : 1;
-                            double procHealth = (getEDmg(enemyR) * multipleE + getQDmg(enemyR) * multipleQ + getRDmg(enemyR)) / enemyR.Health;
-                            if (procHealth > 1 && procHealth < 1.5)
-                                ult = true;
+                            if (player.Level < 14)
+                            {
+                                int multipleE = (facingEnemies == 1) ? 4 : 2;
+                                int multipleQ = (facingEnemies == 1) ? 2 : 1;
+                                double procHealth = (getEDmg(enemyR) * multipleE + getQDmg(enemyR) * multipleQ + getRDmg(enemyR)) / enemyR.Health;
+                                if (procHealth > 1 && procHealth < 1.5)
+                                    ult = true;
+                            }
                         }
-
+                        
                         if (ult) R.Cast(castPred.CastPosition, packetCast);
                     }
                 }
             }
 
-            if (E.IsReady() && (!harass || menu.Item("eHarass").GetValue<bool>()))
+
+            if (E.IsReady() && Environment.TickCount > legitEdelay && (!harass || menu.Item("eHarass").GetValue<bool>()))
             {
                 Obj_AI_Hero mainTarget = null;
 
@@ -393,6 +414,13 @@ namespace Cassiopeia
 
                     if (E.Cast(mainTarget, packetCast) == Spell.CastStates.SuccessfullyCasted)
                     {
+                        int castEdelay = menu.Item("castedalay").GetValue<Slider>().Value;
+                        if (castEdelay > 0)
+                        {
+                            Random rand = new Random();
+                            legitEdelay = Environment.TickCount + rand.Next(castEdelay);
+                        }
+
                         if (getEDmg(mainTarget) > mainTarget.Health * 1.1)
                         {
                             dontUseQW = mainTarget.NetworkId;
@@ -422,7 +450,7 @@ namespace Cassiopeia
                     }
                 }
 
-                if (!Q.IsReady() && castWafter < Game.Time && W.IsReady() && !enemy.HasBuffOfType(BuffType.Poison) && (!harass || menu.Item("wHarass").GetValue<bool>()))
+                if (!Q.IsReady() && castWafter < Game.Time && W.IsReady() && (!enemy.HasBuffOfType(BuffType.Poison) || !menu.Item("castWPoisoned").GetValue<bool>()) && (!harass || menu.Item("wHarass").GetValue<bool>()))
                 {
                     W.CastIfHitchanceEquals(enemy, HitChance.High, packetCast);
                     return;
@@ -471,7 +499,7 @@ namespace Cassiopeia
 
         private static List<Obj_AI_Hero> GetEnemyList()
         {
-            return ObjectManager.Get<Obj_AI_Hero>().Where(x => x.IsEnemy && x.IsValid).ToList();
+            return ObjectManager.Get<Obj_AI_Hero>().Where(x => x.IsEnemy && x.IsValid && !x.IsInvulnerable).ToList();
         }
 
         private static double getQDmg(Obj_AI_Base target)

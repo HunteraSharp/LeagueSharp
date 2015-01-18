@@ -61,6 +61,7 @@ namespace Cassiopeia
             menu.AddSubMenu(new Menu("LineClear", "LineClear"));
             menu.SubMenu("LineClear").AddItem(new MenuItem("lineclearQ", "Use Q").SetValue(true));
             menu.SubMenu("LineClear").AddItem(new MenuItem("lineclearW", "Use W").SetValue(false));
+            menu.SubMenu("LineClear").AddItem(new MenuItem("onlylasthitE", "Only last hit E").SetValue(true));
 
             menu.AddSubMenu(new Menu("JungleClear", "JungleClear"));
             menu.SubMenu("JungleClear").AddItem(new MenuItem("jungleclearQ", "Use Q").SetValue(true));
@@ -206,9 +207,16 @@ namespace Cassiopeia
 
             Boolean packetCast = menu.Item("PacketCast").GetValue<bool>();
 
+            if (E.IsReady())
+            {
+                Obj_AI_Base mob = mobs.Where(x => x.HasBuffOfType(BuffType.Poison) && x.IsValidTarget(E.Range) && GetPoisonBuffEndTime(x) > (Game.Time + E.Delay)).FirstOrDefault();
+                if (mob != null && (!menu.Item("onlylasthitE").GetValue<bool>() || getEDmg(mob) >= mob.Health * 1.1))
+                    E.CastOnUnit(mob, packetCast);
+            }
+
             if (Q.IsReady() && menu.Item("lineclearQ").GetValue<bool>())
             {
-                MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), Q.Width * 0.9f);
+                MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), Q.Width * 0.95f);
                 if (Qunpoisoned.MinionsHit > 0)
                 {
                     Q.Cast(Qunpoisoned.Position, packetCast);
@@ -223,13 +231,6 @@ namespace Cassiopeia
                 if (Qunpoisoned.MinionsHit > 0)
                     W.Cast(Qunpoisoned.Position, packetCast);
             }
-
-            if (E.IsReady())
-            {
-                Obj_AI_Base mob = mobs.Where(x => x.HasBuffOfType(BuffType.Poison) && x.IsValidTarget(E.Range) && GetPoisonBuffEndTime(x) > (Game.Time + E.Delay)).FirstOrDefault();
-                if (mob != null)
-                    E.CastOnUnit(mob, packetCast);
-            }
         }
 
         private static void JungleClear()
@@ -241,7 +242,7 @@ namespace Cassiopeia
 
             Boolean packetCast = menu.Item("PacketCast").GetValue<bool>();
             
-            MinionManager.FarmLocation mf = Q.GetCircularFarmLocation(mobs, Q.Width * 0.9f);
+            MinionManager.FarmLocation mf = Q.GetCircularFarmLocation(mobs, Q.Width * 0.90f);
 
             if (Q.IsReady() && menu.Item("jungleclearQ").GetValue<bool>())
             {

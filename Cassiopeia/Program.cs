@@ -70,18 +70,36 @@ namespace Cassiopeia
             menu.SubMenu("JungleClear").AddItem(new MenuItem("jungleclearQ", "Use Q").SetValue(true));
             menu.SubMenu("JungleClear").AddItem(new MenuItem("jungleclearW", "Use W").SetValue(false));
 
+            menu.AddSubMenu(new Menu("Ultimate", "Ultimate"));
+            menu.SubMenu("Ultimate").AddItem(new MenuItem("comboR", "Use ult in Combo").SetValue(true));
+
+            menu.SubMenu("Ultimate").SubMenu("AntiGapcloser").AddItem(new MenuItem("gapcloserR", "Use ult for Anti Gapcloser").SetValue(true));
+            menu.SubMenu("Ultimate").SubMenu("Interruptspells").AddItem(new MenuItem("interruptR", "Use ult for Interrupt spells").SetValue(true));
+
+            List<Obj_AI_Hero> enemiesChamps = ObjectManager.Get<Obj_AI_Hero>().Where(x => x.IsEnemy).ToList();
+            foreach (Obj_AI_Hero enemyChamp in enemiesChamps)
+            {
+                menu.SubMenu("Ultimate").SubMenu("AntiGapcloser").AddItem(new MenuItem(enemyChamp.ChampionName + "gapcloser", "Anti Gapcloser " + enemyChamp.ChampionName).SetValue(true));
+                menu.SubMenu("Ultimate").SubMenu("Interruptspells").AddItem(new MenuItem(enemyChamp.ChampionName + "interrupt", "Interrupt spells of " + enemyChamp.ChampionName).SetValue(true));
+            }
+
             menu.AddSubMenu(new Menu("Misc", "Misc"));
             menu.SubMenu("Misc").AddItem(new MenuItem("castedalay", "Cast E delay (in ticks)").SetValue(new Slider(0, 0, 2000)));
             menu.SubMenu("Misc").AddItem(new MenuItem("castWPoisoned", "Cast W only if target isn't poisoned").SetValue(true));
-            menu.SubMenu("Misc").AddItem(new MenuItem("focusSelectedTarget", "Focus Selected Target").SetValue(true));
+            menu.SubMenu("Misc").AddItem(new MenuItem("focusSelectedTarget", "Focus Selected Target").SetValue(false));
             menu.SubMenu("Misc").AddItem(new MenuItem("useAAcombo", "Use AA in Combo").SetValue(true));
             menu.SubMenu("Misc").AddItem(new MenuItem("PacketCast", "Use Packets").SetValue(true));
+
+            menu.AddSubMenu(new Menu("Drawings", "Drawings"));
+            menu.SubMenu("Drawings").AddItem(new MenuItem("QRange", "Draw Q").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
+            menu.SubMenu("Drawings").AddItem(new MenuItem("ERange", "Draw E").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
+            menu.SubMenu("Drawings").AddItem(new MenuItem("RRange", "Draw R").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
 
             menu.AddToMainMenu();
             
             Game.OnGameUpdate += OnGameUpdate;
             Orbwalking.BeforeAttack += Orbwalking_BeforeAttack;
-            //Game.OnGameSendPacket += Game_OnGameSendPacket;
+            Game.OnGameSendPacket += Game_OnGameSendPacket;
             AntiGapcloser.OnEnemyGapcloser += AntiGapcloser_OnEnemyGapcloser;
             Interrupter.OnPossibleToInterrupt += Interrupter_OnPossibleToInterrupt;
             Game.OnWndProc += GameOnOnWndProc;
@@ -130,6 +148,19 @@ namespace Cassiopeia
                 }
             }
 
+            var menuItemQ = menu.Item("QRange").GetValue<Circle>();
+            if (menuItemQ.Active)
+                Render.Circle.DrawCircle(player.Position, Q.Range, menuItemQ.Color);
+
+            var menuItemE = menu.Item("ERange").GetValue<Circle>();
+            if (menuItemE.Active)
+                Render.Circle.DrawCircle(player.Position, E.Range, menuItemE.Color);
+
+            var menuItemR = menu.Item("RRange").GetValue<Circle>();
+            if (menuItemR.Active && R.IsReady() && R.Level > 0)
+                Render.Circle.DrawCircle(player.Position, R.Range, menuItemR.Color);
+
+
             if (menu.Item("focusSelectedTarget").GetValue<bool>())
             {
                 if (selectedTarget.IsValidTarget())
@@ -171,13 +202,20 @@ namespace Cassiopeia
 
         static void AntiGapcloser_OnEnemyGapcloser(ActiveGapcloser gapcloser)
         {
-            if (gapcloser.Sender.IsValidTarget(R.Range) && R.IsReady())
+            if (!menu.Item("gapcloserR").GetValue<bool>()) return;
+            
+            if (gapcloser.Sender.IsValidTarget(R.Range) && R.IsReady() && menu.Item(gapcloser.Sender.ChampionName + "gapcloser").GetValue<bool>())
                 R.Cast(gapcloser.Sender.ServerPosition, menu.Item("PacketCast").GetValue<bool>());
         }
 
         static void Interrupter_OnPossibleToInterrupt(Obj_AI_Base unit, InterruptableSpell spell)
         {
-            if (unit.IsValidTarget(R.Range) && spell.DangerLevel >= InterruptableDangerLevel.High)
+            if (!menu.Item("interruptR").GetValue<bool>()) return;
+            if (!(unit is Obj_AI_Hero)) return;
+
+            Obj_AI_Hero sender = unit as Obj_AI_Hero;
+
+            if (unit.IsValidTarget(R.Range) && spell.DangerLevel >= InterruptableDangerLevel.High && menu.Item(sender + "interrupt").GetValue<bool>())
                 R.CastIfHitchanceEquals(unit, unit.IsMoving ? HitChance.High : HitChance.Medium, menu.Item("PacketCast").GetValue<bool>());
         }
 
@@ -200,7 +238,7 @@ namespace Cassiopeia
                 }
             }
         }
-
+        
         private static void EFarm()
         {
             List<Obj_AI_Base> MinionList = MinionManager.GetMinions(player.ServerPosition, E.Range, MinionTypes.All, MinionTeam.Enemy, MinionOrderTypes.Health);
@@ -319,33 +357,37 @@ namespace Cassiopeia
 
             if (R.IsReady() && !harass)
             {
-                Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(650f)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
-                if (enemyR != null)
+                if (menu.Item("comboR").GetValue<bool>())
                 {
-                    PredictionOutput castPred = R.GetPrediction(enemyR, true, R.Range);
-                    
-                    List<Obj_AI_Hero> enemiesHit = GetEnemyList().Where(x => R.WillHit(x.Position, castPred.CastPosition)).ToList();
-                    int facingEnemies = enemiesHit.Where(x => x.IsFacing(player)).Count();
-                    int countList = enemiesHit.Count();
-
-                    if ((countList >= 2 && facingEnemies >= 1) || countList >= 3 || (countList == 1 && player.Level < 14))
+                    Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(650f)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
+                    if (enemyR != null)
                     {
-                        Boolean ult = true;
+                        PredictionOutput castPred = R.GetPrediction(enemyR, true, R.Range);
 
-                        if (countList == 1)
+                        List<Obj_AI_Hero> enemiesHit = GetEnemyList().Where(x => R.WillHit(x.Position, castPred.CastPosition)).ToList();
+                        int facingEnemies = enemiesHit.Where(x => x.IsFacing(player)).Count();
+                        int countList2 = GetEnemyList().Where(x => x.Distance(enemyR.Position) < 250).Count();
+                        int countList = enemiesHit.Count();
+
+                        if ((countList >= 2 && facingEnemies >= 1) || countList >= 3 || countList2 >= 3 || (countList == 1 && player.Level < 14))
                         {
-                            ult = false;
-                            if (player.Level < 14)
+                            Boolean ult = true;
+
+                            if (countList == 1)
                             {
-                                int multipleE = (facingEnemies == 1) ? 4 : 2;
-                                int multipleQ = (facingEnemies == 1) ? 2 : 1;
-                                double procHealth = (getEDmg(enemyR) * multipleE + getQDmg(enemyR) * multipleQ + getRDmg(enemyR)) / enemyR.Health;
-                                if (procHealth > 1 && procHealth < 1.5)
-                                    ult = true;
+                                ult = false;
+                                if (player.Level < 14)
+                                {
+                                    int multipleE = (facingEnemies == 1) ? 4 : 2;
+                                    int multipleQ = (facingEnemies == 1) ? 2 : 1;
+                                    double procHealth = (getEDmg(enemyR) * multipleE + getQDmg(enemyR) * multipleQ + getRDmg(enemyR)) / enemyR.Health;
+                                    if (procHealth > 1 && procHealth < 1.5)
+                                        ult = true;
+                                }
                             }
+
+                            if (ult) R.Cast(castPred.CastPosition, packetCast);
                         }
-                        
-                        if (ult) R.Cast(castPred.CastPosition, packetCast);
                     }
                 }
             }
@@ -473,7 +515,10 @@ namespace Cassiopeia
                             if (eTarget.NetworkId == dontUseQW)
                                 continue;
                         
-                        if (player.Distance(Q.GetPrediction(eTarget, true, Q.Range).CastPosition) > Q.Range) continue;
+                        PredictionOutput QPred = Q.GetPrediction(eTarget, true, Q.Range);
+                        if (QPred.AoeTargetsHitCount > 0)
+                            if (player.Distance(QPred.CastPosition) > Q.Range)
+                                continue;
 
                         double casts = eTarget.Health / getEDmg(eTarget);
                         if (minCasts == -1 || minCasts > casts)

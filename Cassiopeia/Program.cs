@@ -402,17 +402,14 @@ namespace Cassiopeia
                 }
             }
 
-            if (menu.Item("useAAcombo").GetValue<bool>())
+            try
             {
-                try
-                {
-                    if (checkTarget)
-                        Orbwalker.ForceTarget(GetEnemyList().Where(x => x.IsValidTarget(Orbwalking.GetRealAutoAttackRange(x))).OrderBy(x => x.Health / getEDmg(x)).FirstOrDefault());
-                    else
-                        Orbwalker.ForceTarget(selectedTarget);
-                }
-                catch (Exception ex) { }
+                if (checkTarget)
+                    Orbwalker.ForceTarget(GetEnemyList().Where(x => x.IsValidTarget(Orbwalking.GetRealAutoAttackRange(x))).OrderBy(x => x.Health / getEDmg(x)).FirstOrDefault());
+                else
+                    Orbwalker.ForceTarget(selectedTarget);
             }
+            catch (Exception ex) { }
 
             Boolean packetCast = menu.Item("PacketCast").GetValue<bool>();
 
@@ -442,7 +439,7 @@ namespace Cassiopeia
                                     int multipleE = (facingEnemies == 1) ? 4 : 2;
                                     int multipleQ = (facingEnemies == 1) ? 2 : 1;
                                     double procHealth = (getEDmg(enemyR) * multipleE + getQDmg(enemyR) * multipleQ + getRDmg(enemyR)) / enemyR.Health;
-                                    if (procHealth > 1 && procHealth < 1.5)
+                                    if (procHealth > 1 && procHealth < 1.5 && (enemyR.HasBuffOfType(BuffType.Poison) || Q.IsReady() || W.IsReady()) && (E.IsReady() || player.Spellbook.GetSpell(E.Slot).CooldownExpires < 1))
                                         ult = true;
                                 }
                             }

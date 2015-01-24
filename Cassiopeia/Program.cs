@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using LeagueSharp;
 using LeagueSharp.Common;
 using SharpDX;
+using System.Text.RegularExpressions;
 using Color = System.Drawing.Color;
 
 namespace Cassiopeia
@@ -18,13 +19,14 @@ namespace Cassiopeia
         static Spell W;
         static Spell E;
         static Spell R;
-        static SpellSlot IgniteSlot = player.GetSpellSlot("SummonerDot");
         static int dontUseQW = -1;
         static float dontUseQW2 = 0;
         static float castWafter = 0;
         static float castWafter2 = 0;
         static Obj_AI_Hero selectedTarget = null;
         static int legitEdelay = 0;
+        static int wallCastTick = 0;
+        static Vector2 yasuoWallPos;
 
         static Boolean debug = false;
 
@@ -76,11 +78,14 @@ namespace Cassiopeia
             menu.SubMenu("Ultimate").SubMenu("AntiGapcloser").AddItem(new MenuItem("gapcloserR", "Use ult for Anti Gapcloser").SetValue(true));
             menu.SubMenu("Ultimate").SubMenu("Interruptspells").AddItem(new MenuItem("interruptR", "Use ult for Interrupt spells").SetValue(true));
 
+            Boolean yasuoHere = false;
             List<Obj_AI_Hero> enemiesChamps = ObjectManager.Get<Obj_AI_Hero>().Where(x => x.IsEnemy).ToList();
             foreach (Obj_AI_Hero enemyChamp in enemiesChamps)
             {
                 menu.SubMenu("Ultimate").SubMenu("AntiGapcloser").AddItem(new MenuItem(enemyChamp.ChampionName + "gapcloser", "Anti Gapcloser " + enemyChamp.ChampionName).SetValue(true));
                 menu.SubMenu("Ultimate").SubMenu("Interruptspells").AddItem(new MenuItem(enemyChamp.ChampionName + "interrupt", "Interrupt spells of " + enemyChamp.ChampionName).SetValue(true));
+                if (enemyChamp.ChampionName == "Yasuo")
+                    yasuoHere = true;
             }
 
             menu.AddSubMenu(new Menu("Misc", "Misc"));
@@ -104,6 +109,62 @@ namespace Cassiopeia
             Interrupter.OnPossibleToInterrupt += Interrupter_OnPossibleToInterrupt;
             Game.OnWndProc += GameOnOnWndProc;
             Drawing.OnDraw += DrawingOnOnDraw;
+            if (yasuoHere)
+                Obj_AI_Base.OnProcessSpellCast += Obj_AI_Hero_OnProcessSpellCast;
+        }
+
+        static void Obj_AI_Hero_OnProcessSpellCast(Obj_AI_Base sender, GameObjectProcessSpellCastEventArgs args)
+        {
+            if (sender.IsValid && sender.IsEnemy && sender is Obj_AI_Hero && args.SData.Name == "YasuoWMovingWall" && player.Distance(sender.Position) < 2000)
+            {
+                wallCastTick = Environment.TickCount + 4000;
+                yasuoWallPos = sender.ServerPosition.To2D();
+            }
+        }
+
+        static Boolean checkYasuoWall(Vector3 enemyPos)
+        {
+            if (wallCastTick > Environment.TickCount)
+            {
+                GameObject wall = null;
+                foreach (var gameObject in ObjectManager.Get<GameObject>())
+                {
+                    if (gameObject.IsValid && Regex.IsMatch(gameObject.Name, "_w_windwall", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    {
+                        wall = gameObject;
+                        break;
+                    }
+                }
+
+                if (wall == null)
+                    return false;
+
+                int wallWidth = (300 + 50 * Convert.ToInt32(wall.Name.Substring(wall.Name.Length - 6, 1)));
+
+                var wallDirection = (wall.Position.To2D() - yasuoWallPos).Normalized().Perpendicular();
+                var wallStart = wall.Position.To2D() + wallWidth / 2 * wallDirection;
+                var wallEnd = wallStart - wallWidth * wallDirection;
+
+                Vector2 Direction = (wallEnd - wallStart).Normalized();
+                Vector2 Perpendicular = Direction.Perpendicular();
+                Geometry.Polygon wallPolygon = new Geometry.Polygon();
+
+                int widthWall = 75;
+                wallPolygon.Add(wallStart + widthWall * Perpendicular);
+                wallPolygon.Add(wallStart - widthWall * Perpendicular);
+                wallPolygon.Add(wallEnd - widthWall * Perpendicular);
+                wallPolygon.Add(wallEnd + widthWall * Perpendicular);
+
+                int polygonCounts = wallPolygon.Points.Count;
+                for (var i = 0; i < polygonCounts; i++)
+                {
+                    var inter = wallPolygon.Points[i].Intersection(wallPolygon.Points[i != polygonCounts - 1 ? i + 1 : 0], player.ServerPosition.To2D(), enemyPos.To2D());
+                    if (inter.Intersects)
+                        return true;
+                }
+            }
+
+            return false;
         }
 
         static void OnGameUpdate(EventArgs args)
@@ -359,7 +420,7 @@ namespace Cassiopeia
             {
                 if (menu.Item("comboR").GetValue<bool>())
                 {
-                    Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(650f)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
+                    Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(550f)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
                     if (enemyR != null)
                     {
                         PredictionOutput castPred = R.GetPrediction(enemyR, true, R.Range);
@@ -369,14 +430,14 @@ namespace Cassiopeia
                         int countList2 = GetEnemyList().Where(x => x.Distance(enemyR.Position) < 250).Count();
                         int countList = enemiesHit.Count();
 
-                        if ((countList >= 2 && facingEnemies >= 1) || countList >= 3 || countList2 >= 3 || (countList == 1 && player.Level < 14))
+                        if ((countList >= 2 && facingEnemies >= 1) || countList >= 3 || countList2 >= 3 || (countList == 1 && player.Level < 11))
                         {
                             Boolean ult = true;
 
                             if (countList == 1)
                             {
                                 ult = false;
-                                if (player.Level < 14)
+                                if (player.Level < 11)
                                 {
                                     int multipleE = (facingEnemies == 1) ? 4 : 2;
                                     int multipleQ = (facingEnemies == 1) ? 2 : 1;
@@ -412,6 +473,7 @@ namespace Cassiopeia
                         foreach (Obj_AI_Hero enemyto in Eenemies)
                         {
                             if (!enemyto.IsValidTarget(E.Range)) continue;
+                            if (checkYasuoWall(enemyto.ServerPosition)) continue;
 
                             Boolean buffedEnemy = false;
                             if (enemyto.HasBuffOfType(BuffType.Poison))
@@ -476,13 +538,6 @@ namespace Cassiopeia
             
             if (enemy != null)
             {
-                if (IgniteSlot != SpellSlot.Unknown && player.Spellbook.CanUseSpell(IgniteSlot) == SpellState.Ready)
-                {
-                    if (player.Distance(enemy.Position) <= 600f)
-                        if (ObjectManager.Player.GetSummonerSpellDamage(enemy, Damage.SummonerSpell.Ignite) / enemy.Health > 1.05)
-                            player.Spellbook.CastSpell(IgniteSlot, enemy);
-                }
-
                 if (Q.IsReady() && (!harass || menu.Item("qHarass").GetValue<bool>()))
                 {
                     if (Q.CastIfHitchanceEquals(enemy, HitChance.High, packetCast))
@@ -503,9 +558,10 @@ namespace Cassiopeia
         private static Obj_AI_Hero getTarget(float range)
         {
             Obj_AI_Hero target = null;
-
+            
             if (Q.IsReady() || W.IsReady())
             {
+                Boolean targetWall = false;
                 double minCasts = -1;
                 foreach (var eTarget in GetEnemyList())
                 {
@@ -514,18 +570,27 @@ namespace Cassiopeia
                         if (dontUseQW2 > Game.ClockTime)
                             if (eTarget.NetworkId == dontUseQW)
                                 continue;
-                        
+
                         PredictionOutput QPred = Q.GetPrediction(eTarget, true, Q.Range);
                         if (QPred.AoeTargetsHitCount > 0)
                             if (player.Distance(QPred.CastPosition) > Q.Range)
                                 continue;
 
+                        Boolean wallHit = checkYasuoWall(eTarget.ServerPosition);
+                        if (wallHit)
+                        {
+                            if (!Q.IsReady() || (target != null && !targetWall))
+                                continue;
+                        }
+
                         double casts = eTarget.Health / getEDmg(eTarget);
-                        if (minCasts == -1 || minCasts > casts)
+                        if (target == null || minCasts > casts)
                         {
                             target = eTarget;
                             minCasts = casts;
                         }
+
+                        targetWall = wallHit;
                     }
                 }
             }

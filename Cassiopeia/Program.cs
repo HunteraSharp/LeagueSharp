@@ -420,14 +420,14 @@ namespace Cassiopeia
             {
                 if (menu.Item("comboR").GetValue<bool>())
                 {
-                    Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(550f)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
+                    Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(550f) && !checkYasuoWall(x.Position)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
                     if (enemyR != null)
                     {
                         PredictionOutput castPred = R.GetPrediction(enemyR, true, R.Range);
 
-                        List<Obj_AI_Hero> enemiesHit = GetEnemyList().Where(x => R.WillHit(x.Position, castPred.CastPosition)).ToList();
+                        List<Obj_AI_Hero> enemiesHit = GetEnemyList().Where(x => R.WillHit(x.Position, castPred.CastPosition) && !checkYasuoWall(x.Position)).ToList();
                         int facingEnemies = enemiesHit.Where(x => x.IsFacing(player)).Count();
-                        int countList2 = GetEnemyList().Where(x => x.Distance(enemyR.Position) < 250).Count();
+                        int countList2 = GetEnemyList().Where(x => x.Distance(enemyR.Position) < 250 && !checkYasuoWall(x.Position)).Count();
                         int countList = enemiesHit.Count();
 
                         if ((countList >= 2 && facingEnemies >= 1) || countList >= 3 || countList2 >= 3 || (countList == 1 && player.Level < 11))

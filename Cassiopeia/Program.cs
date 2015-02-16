@@ -51,7 +51,7 @@ namespace Cassiopeia
 
             E = new Spell(SpellSlot.E, 700f);
             E.SetTargetted(0.2f, float.MaxValue);
-            
+
             R = new Spell(SpellSlot.R, 800f);
             R.SetSkillshot(0.6f, (float)(80 * Math.PI / 180), float.MaxValue, false, SkillshotType.SkillshotCone);
 
@@ -75,7 +75,7 @@ namespace Cassiopeia
             menu.AddSubMenu(new Menu("Ultimate", "Ultimate"));
             menu.SubMenu("Ultimate").AddItem(new MenuItem("comboR", "Use ult in Combo").SetValue(true));
 
-            menu.SubMenu("Ultimate").SubMenu("AntiGapcloser").AddItem(new MenuItem("gapcloserR", "Use ult for Anti Gapcloser").SetValue(true));
+            menu.SubMenu("Ultimate").SubMenu("AntiGapcloser").AddItem(new MenuItem("gapcloserR", "Use ult for Anti Gapcloser").SetValue(false));
             menu.SubMenu("Ultimate").SubMenu("Interruptspells").AddItem(new MenuItem("interruptR", "Use ult for Interrupt spells").SetValue(true));
 
             Boolean yasuoHere = false;
@@ -101,12 +101,12 @@ namespace Cassiopeia
             menu.SubMenu("Drawings").AddItem(new MenuItem("RRange", "Draw R").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
 
             menu.AddToMainMenu();
-            
+
             Game.OnGameUpdate += OnGameUpdate;
             Orbwalking.BeforeAttack += Orbwalking_BeforeAttack;
             Game.OnGameSendPacket += Game_OnGameSendPacket;
             AntiGapcloser.OnEnemyGapcloser += AntiGapcloser_OnEnemyGapcloser;
-            Interrupter.OnPossibleToInterrupt += Interrupter_OnPossibleToInterrupt;
+            Interrupter2.OnInterruptableTarget += Interrupter2_OnInterruptableTarget;
             Game.OnWndProc += GameOnOnWndProc;
             Drawing.OnDraw += DrawingOnOnDraw;
             if (yasuoHere)
@@ -264,20 +264,20 @@ namespace Cassiopeia
         static void AntiGapcloser_OnEnemyGapcloser(ActiveGapcloser gapcloser)
         {
             if (!menu.Item("gapcloserR").GetValue<bool>()) return;
-            
-            if (gapcloser.Sender.IsValidTarget(R.Range) && R.IsReady() && menu.Item(gapcloser.Sender.ChampionName + "gapcloser").GetValue<bool>())
+
+            String senderName = gapcloser.Sender.ChampionName;
+            if (senderName == "LeBlanc" || senderName == "MasterYi") return;
+
+            if (gapcloser.Sender.IsValidTarget(R.Range) && R.IsReady() && menu.Item(gapcloser.Sender.ChampionName + "gapcloser").GetValue<bool>() && gapcloser.Sender.IsFacing(player))
                 R.Cast(gapcloser.Sender.ServerPosition, menu.Item("PacketCast").GetValue<bool>());
         }
 
-        static void Interrupter_OnPossibleToInterrupt(Obj_AI_Base unit, InterruptableSpell spell)
+        static void Interrupter2_OnInterruptableTarget(Obj_AI_Hero sender, Interrupter2.InterruptableTargetEventArgs args)
         {
             if (!menu.Item("interruptR").GetValue<bool>()) return;
-            if (!(unit is Obj_AI_Hero)) return;
 
-            Obj_AI_Hero sender = unit as Obj_AI_Hero;
-
-            if (unit.IsValidTarget(R.Range) && spell.DangerLevel >= InterruptableDangerLevel.High && menu.Item(sender + "interrupt").GetValue<bool>())
-                R.CastIfHitchanceEquals(unit, unit.IsMoving ? HitChance.High : HitChance.Medium, menu.Item("PacketCast").GetValue<bool>());
+            if (sender.IsValidTarget(R.Range) && args.DangerLevel >= Interrupter2.DangerLevel.High && menu.Item(sender.ChampionName + "interrupt").GetValue<bool>() && sender.IsFacing(player))
+                R.CastIfHitchanceEquals(sender, HitChance.High, menu.Item("PacketCast").GetValue<bool>());
         }
 
         static void Orbwalking_BeforeAttack(Orbwalking.BeforeAttackEventArgs args)
@@ -333,7 +333,7 @@ namespace Cassiopeia
             if (Q.IsReady() && menu.Item("lineclearQ").GetValue<bool>())
             {
                 MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), Q.Width * 0.95f);
-                if (Qunpoisoned.MinionsHit > 0)
+                if (Qunpoisoned.MinionsHit > 1)
                 {
                     Q.Cast(Qunpoisoned.Position, packetCast);
                     castWafter2 = Game.Time + Q.Delay;
@@ -344,7 +344,7 @@ namespace Cassiopeia
             if (W.IsReady() && menu.Item("lineclearW").GetValue<bool>() && castWafter2 < Game.Time)
             {
                 MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), W.Width);
-                if (Qunpoisoned.MinionsHit > 0)
+                if (Qunpoisoned.MinionsHit > 1)
                     W.Cast(Qunpoisoned.Position, packetCast);
             }
         }
@@ -436,8 +436,8 @@ namespace Cassiopeia
                                 ult = false;
                                 if (player.Level < 11)
                                 {
-                                    int multipleE = (facingEnemies == 1) ? 4 : 2;
-                                    int multipleQ = (facingEnemies == 1) ? 2 : 1;
+                                    int multipleE = (facingEnemies == 1) ? 5 : 2;
+                                    int multipleQ = (facingEnemies == 1) ? 3 : 1;
                                     double procHealth = (getEDmg(enemyR) * multipleE + getQDmg(enemyR) * multipleQ + getRDmg(enemyR)) / enemyR.Health;
                                     if (procHealth > 1 && procHealth < 1.5 && (enemyR.HasBuffOfType(BuffType.Poison) || Q.IsReady() || W.IsReady()) && (E.IsReady() || player.Spellbook.GetSpell(E.Slot).CooldownExpires < 1))
                                         ult = true;

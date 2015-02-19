@@ -15,6 +15,7 @@ namespace Cassiopeia
     {
         static readonly Obj_AI_Hero player = ObjectManager.Player;
         static Orbwalking.Orbwalker Orbwalker;
+        static HpBarIndicator hpi = new HpBarIndicator();
         static Spell Q;
         static Spell W;
         static Spell E;
@@ -96,9 +97,13 @@ namespace Cassiopeia
             menu.SubMenu("Misc").AddItem(new MenuItem("PacketCast", "Use Packets").SetValue(true));
 
             menu.AddSubMenu(new Menu("Drawings", "Drawings"));
-            menu.SubMenu("Drawings").AddItem(new MenuItem("QRange", "Draw Q").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
-            menu.SubMenu("Drawings").AddItem(new MenuItem("ERange", "Draw E").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
-            menu.SubMenu("Drawings").AddItem(new MenuItem("RRange", "Draw R").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
+            menu.SubMenu("Drawings").AddItem(new MenuItem("QRange", "Draws Q range").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
+            menu.SubMenu("Drawings").AddItem(new MenuItem("ERange", "Draws E range").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
+            menu.SubMenu("Drawings").AddItem(new MenuItem("RRange", "Draws R range").SetValue(new Circle(false, Color.FromArgb(150, Color.DodgerBlue))));
+            menu.SubMenu("Drawings").SubMenu("DrawHP").AddItem(new MenuItem("drawHPDmg", "Draws DMG in healthbars").SetValue(true));
+            menu.SubMenu("Drawings").SubMenu("DrawHP").AddItem(new MenuItem("qCountsDraw", "Counts Qs in the calculation").SetValue(new Slider(2, 1, 5)));
+            menu.SubMenu("Drawings").SubMenu("DrawHP").AddItem(new MenuItem("eCountsDraw", "Counts Es in the calculation").SetValue(new Slider(4, 1, 10)));
+            menu.SubMenu("Drawings").SubMenu("DrawHP").AddItem(new MenuItem("RCountsDraw", "Count R in the calculation").SetValue(true));
 
             menu.AddToMainMenu();
 
@@ -109,6 +114,7 @@ namespace Cassiopeia
             Interrupter2.OnInterruptableTarget += Interrupter2_OnInterruptableTarget;
             Game.OnWndProc += GameOnOnWndProc;
             Drawing.OnDraw += DrawingOnOnDraw;
+            Drawing.OnEndScene += OnEndScene;
             if (yasuoHere)
                 Obj_AI_Base.OnProcessSpellCast += Obj_AI_Hero_OnProcessSpellCast;
         }
@@ -194,6 +200,23 @@ namespace Cassiopeia
             catch (Exception ex)
             {
             }
+        }
+
+        static void OnEndScene(EventArgs args)
+        {
+            if (!menu.Item("drawHPDmg").GetValue<bool>()) return;
+
+            foreach (var enemy in ObjectManager.Get<Obj_AI_Hero>().Where(ene => !ene.IsDead && ene.IsEnemy && ene.IsVisible))
+            {
+                hpi.unit = enemy;
+                double dmgTotal = getQDmg(enemy) * menu.Item("qCountsDraw").GetValue<Slider>().Value + getEDmg(enemy) * menu.Item("eCountsDraw").GetValue<Slider>().Value;
+
+                if (menu.Item("RCountsDraw").GetValue<bool>() && R.IsReady())
+                    dmgTotal += getRDmg(enemy);
+
+                hpi.drawDmg((float)dmgTotal, Color.Yellow);
+            }
+
         }
 
         private static void DrawingOnOnDraw(EventArgs args)
@@ -333,7 +356,7 @@ namespace Cassiopeia
             if (Q.IsReady() && menu.Item("lineclearQ").GetValue<bool>())
             {
                 MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), Q.Width * 0.95f);
-                if (Qunpoisoned.MinionsHit > 1)
+                if (Qunpoisoned.MinionsHit > 0)
                 {
                     Q.Cast(Qunpoisoned.Position, packetCast);
                     castWafter2 = Game.Time + Q.Delay;
@@ -344,7 +367,7 @@ namespace Cassiopeia
             if (W.IsReady() && menu.Item("lineclearW").GetValue<bool>() && castWafter2 < Game.Time)
             {
                 MinionManager.FarmLocation Qunpoisoned = Q.GetCircularFarmLocation(mobs.Where(x => !x.HasBuffOfType(BuffType.Poison)).ToList(), W.Width);
-                if (Qunpoisoned.MinionsHit > 1)
+                if (Qunpoisoned.MinionsHit > 0)
                     W.Cast(Qunpoisoned.Position, packetCast);
             }
         }
@@ -417,9 +440,11 @@ namespace Cassiopeia
             {
                 if (menu.Item("comboR").GetValue<bool>())
                 {
-                    Obj_AI_Hero enemyR = GetEnemyList().Where(x => x.IsValidTarget(550f) && !checkYasuoWall(x.Position)).OrderBy(x => x.Health / getRDmg(x)).FirstOrDefault();
-                    if (enemyR != null)
+
+                    var enemyRList = GetEnemyList().Where(x => x.IsValidTarget(825) && !checkYasuoWall(x.Position) && Prediction.GetPrediction(x, R.Delay).UnitPosition.Distance(player.Position) <= 650f).OrderBy(x => x.Health / getRDmg(x)).ToList();
+                    if (enemyRList.Any())
                     {
+                        Obj_AI_Hero enemyR = enemyRList.FirstOrDefault();
                         PredictionOutput castPred = R.GetPrediction(enemyR, true, R.Range);
 
                         List<Obj_AI_Hero> enemiesHit = GetEnemyList().Where(x => R.WillHit(x.Position, castPred.CastPosition) && !checkYasuoWall(x.Position)).ToList();
@@ -436,10 +461,10 @@ namespace Cassiopeia
                                 ult = false;
                                 if (player.Level < 11)
                                 {
-                                    int multipleE = (facingEnemies == 1) ? 5 : 2;
-                                    int multipleQ = (facingEnemies == 1) ? 3 : 1;
+                                    int multipleE = (facingEnemies == 1) ? 5 : 3;
+                                    int multipleQ = (facingEnemies == 1) ? 2 : 1;
                                     double procHealth = (getEDmg(enemyR) * multipleE + getQDmg(enemyR) * multipleQ + getRDmg(enemyR)) / enemyR.Health;
-                                    if (procHealth > 1 && procHealth < 1.5 && (enemyR.HasBuffOfType(BuffType.Poison) || Q.IsReady() || W.IsReady()) && (E.IsReady() || player.Spellbook.GetSpell(E.Slot).CooldownExpires < 1))
+                                    if (procHealth > 1 && procHealth < 2.5 && (enemyR.HasBuffOfType(BuffType.Poison) || Q.IsReady() || W.IsReady()) && (E.IsReady() || player.Spellbook.GetSpell(E.Slot).CooldownExpires < 1))
                                         ult = true;
                                 }
                             }

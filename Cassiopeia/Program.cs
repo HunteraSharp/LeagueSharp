@@ -540,9 +540,9 @@ namespace Cassiopeia
                     if (E.Cast(mainTarget, packetCast) == Spell.CastStates.SuccessfullyCasted)
                     {
                         int castEdelay = menu.Item("castedalay").GetValue<Slider>().Value;
-                        if (castEdelay > 0)
+                        int castEdelay2 = menu.Item("castedalay2").GetValue<Slider>().Value;
+                        if (castEdelay > 0 || castEdelay2 > 0)
                         {
-                            int castEdelay2 = menu.Item("castedalay2").GetValue<Slider>().Value;
                             if (castEdelay2 <= castEdelay)
                                 legitEdelay = Environment.TickCount + castEdelay;
                             else

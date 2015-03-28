@@ -90,7 +90,8 @@ namespace Cassiopeia
             }
 
             menu.AddSubMenu(new Menu("Misc", "Misc"));
-            menu.SubMenu("Misc").AddItem(new MenuItem("castedalay", "Cast E delay (in ticks)").SetValue(new Slider(0, 0, 2000)));
+            menu.SubMenu("Misc").AddItem(new MenuItem("castedalay", "Cast E min delay (in ticks)").SetValue(new Slider(0, 0, 2000)));
+            menu.SubMenu("Misc").AddItem(new MenuItem("castedalay2", "Cast E max delay (in ticks)").SetValue(new Slider(0, 0, 2000)));
             menu.SubMenu("Misc").AddItem(new MenuItem("castWPoisoned", "Cast W only if target isn't poisoned").SetValue(true));
             menu.SubMenu("Misc").AddItem(new MenuItem("focusSelectedTarget", "Focus Selected Target").SetValue(false));
             menu.SubMenu("Misc").AddItem(new MenuItem("useAAcombo", "Use AA in Combo").SetValue(true));
@@ -107,9 +108,9 @@ namespace Cassiopeia
 
             menu.AddToMainMenu();
 
-            Game.OnGameUpdate += OnGameUpdate;
+            Game.OnUpdate += OnGameUpdate;
             Orbwalking.BeforeAttack += Orbwalking_BeforeAttack;
-            Game.OnGameSendPacket += Game_OnGameSendPacket;
+            Game.OnSendPacket += Game_OnGameSendPacket;
             AntiGapcloser.OnEnemyGapcloser += AntiGapcloser_OnEnemyGapcloser;
             Interrupter2.OnInterruptableTarget += Interrupter2_OnInterruptableTarget;
             Game.OnWndProc += GameOnOnWndProc;
@@ -197,9 +198,7 @@ namespace Cassiopeia
                         break;
                 }
             }
-            catch (Exception ex)
-            {
-            }
+            catch (Exception ex) { }
         }
 
         static void OnEndScene(EventArgs args)
@@ -543,8 +542,14 @@ namespace Cassiopeia
                         int castEdelay = menu.Item("castedalay").GetValue<Slider>().Value;
                         if (castEdelay > 0)
                         {
-                            Random rand = new Random();
-                            legitEdelay = Environment.TickCount + rand.Next(castEdelay);
+                            int castEdelay2 = menu.Item("castedalay2").GetValue<Slider>().Value;
+                            if (castEdelay2 <= castEdelay)
+                                legitEdelay = Environment.TickCount + castEdelay;
+                            else
+                            {
+                                Random rand = new Random();
+                                legitEdelay = Environment.TickCount + rand.Next(castEdelay, castEdelay2);
+                            }
                         }
 
                         if (getEDmg(mainTarget) > mainTarget.Health * 1.1)
